@@ -1,0 +1,640 @@
+substitutions:
+  device_name: "countdown-clock"
+  device_friendly_name: "Countdown clock"
+  device_description: "Cute Astronaut prop"
+  time_timezone: "Europe/Amsterdam"
+
+globals:
+  # ESPHome sensor (float) is too small to accurately
+  # represent time in seconds, so we need a global
+  - id: duration_ticks
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: display_text
+    type: std::string
+    # Strings cannot be saved/restored
+    restore_value: no
+
+esphome:
+  name: $device_name
+  friendly_name: $device_friendly_name
+  comment: $device_description
+  includes:
+    - my_custom_output.h
+  on_boot:
+    priority: 600
+    then:
+      # Enable the PM indicator
+      - output.turn_on: segment_A
+      - output.turn_on: module_6
+
+esp32:
+  board: esp32doit-devkit-v1
+#  framework:
+#    type: esp-idf
+#    version: recommended
+
+# Enable status LED
+status_led:
+    pin:
+      number: GPIO19
+      inverted: False
+
+# Enable logging
+logger:
+  level: INFO
+  # Disable logging via UART
+  baud_rate: 0
+    
+# Enable Home Assistant API
+api:
+
+# Secure Over The Air updates
+ota:
+  password: !secret ota_password 
+
+# Configure WiFi
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: $device_friendly_name
+    password: !secret wifi_fallback_password
+captive_portal:
+
+# Initialize shift registers
+sn74hc595:
+  - id: 'sn74hc595_hub'
+    clock_pin: GPIO14
+    latch_pin: GPIO27
+    data_pin: GPIO26
+    sr_count: 2 #Number of chips
+
+output:
+  # Configure segments, directly connected to GPIO
+  # gpio allows ledc dimming, but needs needs high refresh to prevent ghosting
+  - platform: gpio
+    pin: GPIO19
+    id: 'segment_A'
+  - platform: gpio
+    pin: GPIO18
+    id: 'segment_B'
+  - platform: gpio
+    pin: GPIO23
+    id: 'segment_C'
+  - platform: gpio
+    pin: GPIO22
+    id: 'segment_D'
+  - platform: gpio
+    pin: GPIO1
+    id: 'segment_E'
+  - platform: gpio
+    pin: GPIO21
+    id: 'segment_F'
+  - platform: gpio
+    pin: GPIO3
+    id: 'segment_G'
+
+  # Configure modules, connected to sn74hc595 chips
+  - platform: gpio
+    id: 'module_1'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 9
+      inverted: false
+  - platform: gpio
+    id: 'module_2'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 13
+      inverted: false
+  - platform: gpio
+    id: 'module_3'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 12
+      inverted: false
+  - platform: gpio
+    id: 'module_4'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 10
+      inverted: false
+  - platform: gpio
+    id: 'module_5'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 11
+      inverted: false
+  # PM =     Segment A
+  # DIV1_A = Segment G
+  # DIV1_B = Segment E
+  - platform: gpio
+    id: 'module_6'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 1
+      inverted: false
+  - platform: gpio
+    id: 'module_7'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 3
+      inverted: false
+  - platform: gpio
+    id: 'module_8'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 4
+      inverted: false
+  # DIV2_A = Segment F
+  # DIV2_B = Segment G  
+  - platform: gpio
+    id: 'module_9'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 5
+      inverted: false
+  - platform: gpio
+    id: 'module_10'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 6
+      inverted: false
+  - platform: gpio
+    id: 'module_11'
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 7
+      inverted: false
+  
+  # Create a dummy output to use as a light
+  # We need this to have the light UI in HA.
+  - platform: template
+    id: draw_delay
+    type: float
+    write_action:
+    - logger.log:
+        level: info
+        format: "Brightness changed"
+    
+  # A custom output to change the CPU frequency
+  - platform: custom
+    type: binary
+    lambda: |-
+      auto my_high_frequency_loop = new HighFrequencyLoop();
+      App.register_component(my_high_frequency_loop);
+      return {my_high_frequency_loop};
+    outputs:
+      id: high_frequency_loop
+  
+select:
+  # Select the mode for clock functions
+  - platform: template
+    name: Mode
+    id: mode
+    optimistic: true
+    icon: "mdi:history"
+    options:
+     - pause
+     - countdown
+     - countup
+    initial_option: pause
+    set_action:
+      - logger.log:
+          level: INFO
+          format: "Mode: %s"
+          args: ["x.c_str()"]
+
+number:
+  # Sets the duration of the timer
+  - platform: template
+    name: "Duration Days"
+    id: duration_days
+    unit_of_measurement: d
+    mode: box
+    icon: "mdi:clock-digital"
+    optimistic: true
+    min_value: 0
+    max_value: 999
+    step: 1
+    on_value:
+      then:
+        - script.execute: set_duration
+
+  - platform: template
+    name: "Duration Hours"
+    id: duration_hours
+    unit_of_measurement: h
+    mode: box
+    icon: "mdi:clock-digital"
+    optimistic: true
+    min_value: 0
+    max_value: 24
+    step: 1
+    on_value:
+      then:
+        - script.execute: set_duration
+
+  - platform: template
+    name: "Duration Minutes"
+    id: duration_minutes
+    unit_of_measurement: min
+    mode: box
+    icon: "mdi:clock-digital"
+    optimistic: true
+    min_value: 0
+    max_value: 60
+    step: 1
+    on_value:
+      then:
+        - script.execute: set_duration
+
+  - platform: template
+    name: "Duration Seconds"
+    id: duration_seconds
+    unit_of_measurement: s
+    mode: box
+    icon: "mdi:clock-digital"
+    optimistic: true
+    min_value: 0
+    max_value: 60
+    step: 1
+    on_value:
+      then:
+        - script.execute: set_duration
+
+  - platform: template
+    name: "Auto pause time"
+    id: auto_pause_seconds
+    unit_of_measurement: s
+    mode: box
+    icon: "mdi:timer-pause-outline"
+    optimistic: true
+    min_value: 0
+    max_value: 3600
+    step: 1
+
+switch:
+  # Set the ESP32 clock speed to high
+  - platform: output
+    name: "High Speed"
+    output: 'high_frequency_loop'
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: "config"
+
+  - platform: template
+    name: "Auto Pause"
+    icon: "mdi:cog-pause"
+    id: auto_pause
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_OFF
+
+button:
+  # Boot in safe mode
+  - platform: safe_mode
+    name: Safe Mode Boot
+    entity_category: diagnostic
+
+time:
+  # Get the time from HA, so we can use it for uptime
+  - platform: homeassistant
+    id: time_homeassistant
+    timezone: "${time_timezone}"
+    on_time_sync:
+      - component.update: sensor_uptime_timestamp
+
+sensor:
+  #Wifi signal
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 300s
+    id: sensor_wifi_signal
+  
+  # Uptime is used internally only
+  - platform: uptime
+    id: sensor_uptime
+  # This sensor is an alternative for the uptime sensor, which only sends the
+  # startup timestamp of the device to home assistant once
+  - platform: template
+    id: sensor_uptime_timestamp
+    name: "Uptime"
+    entity_category: diagnostic
+    device_class: "timestamp"
+    accuracy_decimals: 0
+    update_interval: never
+    lambda: |-
+      static float timestamp = (
+        id(time_homeassistant).utcnow().timestamp - id(sensor_uptime).state
+      );
+      return timestamp;
+
+text_sensor:
+  # Collect WiFi diagnostics
+  - platform: wifi_info
+    ip_address:
+      name: "IP address"
+      icon: "mdi:network-outline"
+    ssid:
+      name: "Connected SSID"
+    bssid:
+      name: "Connected BSSID"
+  - platform: version
+    id: text_sensor_version
+    name: "ESPHome Version"
+
+light:
+  # Switch off the display and change its brightness
+  - platform: monochromatic
+    name: "Display"
+    id: display
+    output: draw_delay
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+
+interval:
+  # Refresh the screen as fast as possible.
+  - interval: 0ms
+    then:
+      - if:
+          condition:
+            light.is_on: display
+          then:
+            - script.execute: 
+                id: draw_display
+                content: !lambda return id(display_text);
+
+  # Countup/down
+  - interval: 1s
+    then:
+      - lambda: |-
+          if(id(mode).state == "countdown") {
+            if(id(duration_ticks) > 0) {
+              id(duration_ticks) -= 1;
+            }
+            else {
+              // Reached 0, switch to counting up
+              auto call = id(mode).make_call();
+              call.set_option("countup");
+              call.perform();
+              id(duration_ticks) += 1;
+            }
+            id(update_display)->execute(id(duration_ticks));
+          }
+          else if(id(mode).state == "countup") {
+            id(duration_ticks) += 1;
+            id(update_display)->execute(id(duration_ticks));
+          }
+          
+          // Auto pause
+          if(id(mode).state != "pause" && id(auto_pause).state) {
+            if(id(auto_pause_seconds).state == id(duration_ticks)) {
+                auto call = id(mode).make_call();
+                call.set_option("pause");
+                call.perform();
+            }
+          } 
+
+
+script:
+  # Updates the duration based on the numbers inputs
+  - id: set_duration
+    then:
+      - lambda: |-
+          id(duration_ticks) = static_cast<int>(id(duration_seconds).state);
+          id(duration_ticks) += static_cast<int>(id(duration_minutes).state)*60;
+          id(duration_ticks) += static_cast<int>(id(duration_hours).state)*3600;
+          id(duration_ticks) += static_cast<int>(id(duration_days).state)*86400;
+      - script.execute:
+          id: update_display
+          duration: !lambda return id(duration_ticks);
+  
+  # Set the content to display
+  - id: set_display_text
+    parameters:
+      content: string
+    then:
+      - lambda: id(display_text) = content;
+          
+  # Update the display based on the duration
+  - id: update_display
+    parameters:
+      duration: int
+    then:
+      - lambda: id(set_display_text)->execute(str_sprintf("%03d%02d:%02d:%02d", duration/86400, duration/3600 % 24, duration/60 % 60, duration % 60));
+
+  # Draws the display
+  - id: draw_display
+    parameters:
+      # format: dddphh:mm:ss"
+      content: string
+    then:
+      # Draw the characters from right to left
+      - lambda: |-
+          //id(draw_character)->execute("1", 11);
+          int content_length = content.length();
+          int modules = 11;
+          for (int i = content_length; i > 0; i--) {
+            id(draw_character)->execute(content.substr(content_length - i,1), (modules-(i-1)));
+          }
+
+  # Draws one character
+  - id: draw_character
+    parameters:
+      character: string
+      position: int
+    mode: single
+    then:
+    # Turn on the right segments
+      - lambda: |-
+          switch (character.c_str()[0]) {
+            case '0':
+              id(segment_A).turn_on();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_on();
+              id(segment_E).turn_on();
+              id(segment_F).turn_on();
+              id(segment_G).turn_off();
+              break;
+            case '1':
+              id(segment_A).turn_off();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_off();
+              id(segment_E).turn_off();
+              id(segment_F).turn_off();
+              id(segment_G).turn_off();
+              break;
+            case '2':
+              id(segment_A).turn_on();
+              id(segment_B).turn_on();
+              id(segment_C).turn_off();
+              id(segment_D).turn_on();
+              id(segment_E).turn_on();
+              id(segment_F).turn_off();
+              id(segment_G).turn_on();
+              break;
+            case '3':
+              id(segment_A).turn_on();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_on();
+              id(segment_E).turn_off();
+              id(segment_F).turn_off();
+              id(segment_G).turn_on();
+              break;
+            case '4':
+              id(segment_A).turn_off();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_off();
+              id(segment_E).turn_off();
+              id(segment_F).turn_on();
+              id(segment_G).turn_on();
+              break;
+            case '5':
+              id(segment_A).turn_on();
+              id(segment_B).turn_off();
+              id(segment_C).turn_on();
+              id(segment_D).turn_on();
+              id(segment_E).turn_off();
+              id(segment_F).turn_on();
+              id(segment_G).turn_on();
+              break;
+            case '6':
+              id(segment_A).turn_on();
+              id(segment_B).turn_off();
+              id(segment_C).turn_on();
+              id(segment_D).turn_on();
+              id(segment_E).turn_on();
+              id(segment_F).turn_on();
+              id(segment_G).turn_on();
+              break;
+            case '7':
+              id(segment_A).turn_on();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_off();
+              id(segment_E).turn_off();
+              id(segment_F).turn_off();
+              id(segment_G).turn_off();
+              break;
+            case '8':
+              id(segment_A).turn_on();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_on();
+              id(segment_E).turn_on();
+              id(segment_F).turn_on();
+              id(segment_G).turn_on();
+              break;
+            case '9':
+              id(segment_A).turn_on();
+              id(segment_B).turn_on();
+              id(segment_C).turn_on();
+              id(segment_D).turn_on();
+              id(segment_E).turn_off();
+              id(segment_F).turn_on();
+              id(segment_G).turn_on();
+              break;
+            case ' ':
+              id(segment_A).turn_off();
+              id(segment_B).turn_off();
+              id(segment_C).turn_off();
+              id(segment_D).turn_off();
+              id(segment_E).turn_off();
+              id(segment_F).turn_off();
+              id(segment_G).turn_off();
+              break;
+            case ':':
+              id(segment_A).turn_off();
+              id(segment_B).turn_off();
+              id(segment_C).turn_off();
+              id(segment_D).turn_off();
+              id(segment_E).turn_on();
+              id(segment_F).turn_on();
+              id(segment_G).turn_on();
+              break;
+          }
+      # Turn on the right panel
+      - lambda: |-
+          switch (position) {
+            case 1:
+              id(module_1).turn_on();
+              break;
+            case 2:
+              id(module_2).turn_on();
+              break;
+            case 3:
+              id(module_3).turn_on();
+              break;
+            case 4:
+              id(module_4).turn_on();
+              break;
+            case 5:
+              id(module_5).turn_on();
+              break;
+            case 6:
+              id(module_6).turn_on();
+              break;
+            case 7:
+              id(module_7).turn_on();
+              break;
+            case 8:
+              id(module_8).turn_on();
+              break;
+            case 9:
+              id(module_9).turn_on();
+              break;
+            case 10:
+              id(module_10).turn_on();
+              break;
+            case 11:
+              id(module_11).turn_on();
+              break;
+          }
+
+      # Wait, so we can see the LED
+      - lambda: delayMicroseconds(id(display).remote_values.get_brightness() * 500);
+
+      # Turn off the panel
+      - lambda: |-
+          switch (position) {
+            case 1:
+              id(module_1).turn_off();
+              break;
+            case 2:
+              id(module_2).turn_off();
+              break;
+            case 3:
+              id(module_3).turn_off();
+              break;
+            case 4:
+              id(module_4).turn_off();
+              break;
+            case 5:
+              id(module_5).turn_off();
+              break;
+            case 6:
+              id(module_6).turn_off();
+              break;
+            case 7:
+              id(module_7).turn_off();
+              break;
+            case 8:
+              id(module_8).turn_off();
+              break;
+            case 9:
+              id(module_9).turn_off();
+              break;
+            case 10:
+              id(module_10).turn_off();
+              break;
+            case 11:
+              id(module_11).turn_off();
+              break;
+          }
