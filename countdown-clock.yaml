@@ -46,9 +46,6 @@ logger:
   level: INFO
   # Disable logging via UART
   baud_rate: 0
-    
-# Enable Home Assistant API
-api:
 
 # Secure Over The Air updates
 ota:
@@ -59,6 +56,7 @@ wifi:
   ap:
     ssid: "Countdown Clock"
     password: "cuteastronaut"
+    ap_timeout: 0s
   power_save_mode: none
 
 # Enable local web server for standalone operation
@@ -299,38 +297,12 @@ button:
     name: Safe Mode Boot
     entity_category: diagnostic
 
-time:
-  # Get the time from HA, so we can use it for uptime
-  - platform: homeassistant
-    id: time_homeassistant
-    timezone: "${time_timezone}"
-    on_time_sync:
-      - component.update: sensor_uptime_timestamp
-
 sensor:
   #Wifi signal
   - platform: wifi_signal
     name: "WiFi Signal"
     update_interval: 300s
     id: sensor_wifi_signal
-  
-  # Uptime is used internally only
-  - platform: uptime
-    id: sensor_uptime
-  # This sensor is an alternative for the uptime sensor, which only sends the
-  # startup timestamp of the device to home assistant once
-  - platform: template
-    id: sensor_uptime_timestamp
-    name: "Uptime"
-    entity_category: diagnostic
-    device_class: "timestamp"
-    accuracy_decimals: 0
-    update_interval: never
-    lambda: |-
-      static float timestamp = (
-        id(time_homeassistant).utcnow().timestamp - id(sensor_uptime).state
-      );
-      return timestamp;
 
 text_sensor:
   # Collect WiFi diagnostics
