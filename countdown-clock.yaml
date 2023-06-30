@@ -56,14 +56,14 @@ ota:
 
 # Configure WiFi
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: $device_friendly_name
-    password: !secret wifi_fallback_password
-captive_portal:
+    ssid: "Countdown Clock"
+    password: "cuteastronaut"
+  power_save_mode: none
+
+# Enable local web server for standalone operation
+web_server:
+  local: true
 
 # Initialize shift registers
 sn74hc595:
